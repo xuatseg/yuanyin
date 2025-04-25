@@ -1,0 +1,9 @@
+
+基于kotlin、gradle构建项目，创建基础的可编译的环境，要求：
+1. 构建基于 kotlin 2.0 和jetpack可编译框架环境
+2. kotlinOptions.jvmTarget=17，gradle_version=8.10.2，compileSdk=35，targetSdk=35，composeOptions.kotlinCompilerExtensionVersion="2.1.10"
+3. compose作为UI，kotlin作为业务逻辑
+4. 不需要添加具体的业务代码，只需要创建 hello world
+5. 需要包含local.properties文件保存sdk路径
+6. 需要包含gradle.properties文件保存gradle配置
+7. 主题使用Jetpack Compose 默认的 Material3 主题，如果项目不使用compose框架，则使用AppCompat主题
