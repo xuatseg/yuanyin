@@ -11,17 +11,44 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.xuatseg.yuanyin.model.WorkMode
+import com.xuatseg.yuanyin.mode.ProcessingMode
+import com.xuatseg.yuanyin.robot.SensorType
+import com.xuatseg.yuanyin.ui.control.*
+import com.xuatseg.yuanyin.ui.mode.*
 import com.xuatseg.yuanyin.viewmodel.MainViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun MainScreen(viewModel: MainViewModel) {
+fun MainScreen(
+    viewModel: MainViewModel,
+    modeSwitchViewModel: IModeSwitchViewModel,
+    robotControlViewModel: IRobotControlViewModel
+) {
     val botState by viewModel.botState.collectAsState()
+    val modeSwitchUiState by modeSwitchViewModel.getUiState().collectAsState(initial = ModeSwitchUiState(
+        currentMode = ProcessingMode.LOCAL,
+        availableModes = listOf()
+    ))
+    val robotControlUiState by robotControlViewModel.getUiState().collectAsState(initial = RobotControlUiState(
+        robotState = robotControlViewModel.getSystemHealth().let { viewModel.getRobotState() },
+        sensorData = robotControlViewModel.getSensorData(),
+        systemHealth = robotControlViewModel.getSystemHealth(),
+        isConnected = false
+    ))
 
     Scaffold(
         topBar = {
             TopAppBar(
                 title = { Text("AI机器人控制台") },
+                actions = {
+                    // 添加模式切换按钮
+                    ModeSwitchButton(
+                        currentMode = modeSwitchUiState.currentMode,
+                        onModeSwitch = { mode ->
+                            modeSwitchViewModel.handleEvent(ModeSwitchEvent.SwitchMode(mode))
+                        }
+                    )
+                },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.primaryContainer,
                     titleContentColor = MaterialTheme.colorScheme.onPrimaryContainer
@@ -36,120 +63,100 @@ fun MainScreen(viewModel: MainViewModel) {
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            // 状态卡片
-            ElevatedCard(
-                modifier = Modifier.fillMaxWidth()
+            // 状态栏
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Column(
-                    modifier = Modifier
-                        .padding(16.dp)
-                        .fillMaxWidth()
-                ) {
-                    // 连接状态
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text("连接状态")
-                        Text(
-                            text = if (botState.isConnected) "已连接" else "未连接",
-                            color = if (botState.isConnected)
-                                MaterialTheme.colorScheme.primary
-                            else
-                                MaterialTheme.colorScheme.error
-                        )
-                    }
+                // 模式状态指示器
+                ModeStatusIndicator(
+                    modeState = modeSwitchViewModel.getCurrentModeState(),
+                    modifier = Modifier.weight(1f)
+                )
 
-                    Spacer(modifier = Modifier.height(8.dp))
-
-                    // 电池状态
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text("电池电量")
-                        Text("${botState.batteryLevel}%")
-                    }
-
-                    Spacer(modifier = Modifier.height(8.dp))
-
-                    // 工作模式
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text("工作模式")
-                        Text(
-                            text = when(botState.workMode) {
-                                WorkMode.STANDBY -> "待机"
-                                WorkMode.WORKING -> "工作中"
-                                WorkMode.CHARGING -> "充电中"
-                                WorkMode.ERROR -> "错误"
-                            }
-                        )
-                    }
-                }
+                // 电池状态
+                BatteryIndicator(
+                    level = botState.batteryLevel.toFloat(),
+                    isCharging = botState.workMode == WorkMode.CHARGING
+                )
             }
 
-            // 控制按钮
+            // 机器人控制面板
+            RobotControlPanel(
+                uiState = robotControlUiState,
+                onControlEvent = { event ->
+                    robotControlViewModel.handleControlEvent(event)
+                },
+                modifier = Modifier.weight(1f)
+            )
+
+            // 传感器数据显示
+            SensorDataDisplay(
+                sensorData = robotControlUiState.sensorData,
+                selectedSensors = setOf(
+                    SensorType.IMU,
+                    SensorType.LIDAR,
+                    SensorType.BATTERY
+                )
+            )
+
+            // 控制按钮组
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceEvenly
             ) {
-                Button(
-                    onClick = {
-                        viewModel.updateConnectionStatus(!botState.isConnected)
-                    }
-                ) {
-                    Text(if (botState.isConnected) "断开连接" else "连接设备")
-                }
-
-                Button(
-                    onClick = {
-                        viewModel.updateWorkMode(
-                            if (botState.workMode == WorkMode.STANDBY)
-                                WorkMode.WORKING
-                            else
-                                WorkMode.STANDBY
-                        )
+                // 方向控制
+                DirectionalControls(
+                    onMove = { command ->
+                        robotControlViewModel.handleControlEvent(RobotControlEvent.Move(command))
                     },
-                    enabled = botState.isConnected
-                ) {
-                    Text(if (botState.workMode == WorkMode.WORKING) "停止" else "开始工作")
-                }
+                    isEnabled = robotControlUiState.isConnected
+                )
+
+                // 紧急停止按钮
+                EmergencyStopButton(
+                    onStop = {
+                        robotControlViewModel.handleControlEvent(RobotControlEvent.Stop)
+                    },
+                    isEnabled = robotControlUiState.isConnected
+                )
             }
 
+            // 速度控制
+            SpeedControl(
+                currentSpeed = robotControlUiState.robotState.speed.let {
+                    SpeedCommand(it.linear, it.angular)
+                },
+                onSpeedChange = { speedCommand ->
+                    robotControlViewModel.handleControlEvent(RobotControlEvent.SetSpeed(speedCommand))
+                },
+                isEnabled = robotControlUiState.isConnected
+            )
+
+            // 系统健康状态
+            HealthIndicator(
+                health = robotControlUiState.systemHealth,
+                showDetails = true
+            )
+
             // 错误提示
-            botState.error?.let { error ->
-                ElevatedCard(
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = CardDefaults.elevatedCardColors(
-                        containerColor = MaterialTheme.colorScheme.errorContainer
-                    )
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .padding(16.dp)
-                            .fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = error,
-                            color = MaterialTheme.colorScheme.onErrorContainer
-                        )
-                        IconButton(onClick = { viewModel.setError(null) }) {
-                            Icon(
-                                Icons.Default.Close,
-                                contentDescription = "关闭",
-                                tint = MaterialTheme.colorScheme.onErrorContainer
-                            )
-                        }
+            robotControlUiState.error?.let { error ->
+                ErrorSnackbar(
+                    error = error,
+                    onDismiss = {
+                        robotControlViewModel.handleControlEvent(RobotControlEvent.ClearError)
                     }
-                }
+                )
+            }
+
+            // 模式错误提示
+            modeSwitchUiState.error?.let { error ->
+                ModeErrorSnackbar(
+                    error = error,
+                    onDismiss = {
+                        modeSwitchViewModel.handleEvent(ModeSwitchEvent.DismissError)
+                    }
+                )
             }
         }
     }
