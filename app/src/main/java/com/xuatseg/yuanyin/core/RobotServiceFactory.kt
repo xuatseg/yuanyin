@@ -211,7 +211,6 @@ data class ConfigIssue(
 
 /**
  * 示例使用
- */
 class ServiceInitializationExample {
     fun initializeServices(context: Context) {
         // 1. 创建服务构建器
@@ -264,3 +263,4 @@ class ServiceInitializationExample {
         }
     }
 }
+ */

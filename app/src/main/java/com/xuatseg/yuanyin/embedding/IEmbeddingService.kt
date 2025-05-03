@@ -36,6 +36,7 @@ interface IEmbeddingService {
      * @return 相似度结果列表
      */
     suspend fun searchSimilar(query: EmbeddingVector, limit: Int): List<SimilarityResult>
+    fun loadModel(embeddingModelConfig: Any)
 }
 
 /**

@@ -1,6 +1,8 @@
 package com.xuatseg.yuanyin.mode
 
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
 
 /**
  * 模式管理接口
@@ -209,3 +211,58 @@ data class ModeStatistics(
     val successRate: Float,
     val metrics: ModeMetrics
 )
+
+/**
+ * 最简实现，仅用于UI编译通过
+ */
+class ModeManagerStub : IModeManager {
+    private val mode = ProcessingMode.LOCAL
+    private val modeFlow = MutableStateFlow(mode)
+    override suspend fun switchMode(mode: ProcessingMode) {}
+    override fun getCurrentMode() = mode
+    override fun observeMode(): Flow<ProcessingMode> = modeFlow.asStateFlow()
+    override suspend fun isModeAvailable(mode: ProcessingMode) = true
+    override fun getModeConfig(mode: ProcessingMode) = ModeConfig(
+        mode = mode,
+        parameters = emptyMap(),
+        restrictions = ModeRestrictions(1024, 1, 60, false),
+        features = emptySet()
+    )
+}
+
+class ModeSwitchListenerStub : IModeSwitchListener {
+    override fun onModeSwitchStart(fromMode: ProcessingMode, toMode: ProcessingMode) {}
+    override fun onModeSwitchComplete(newMode: ProcessingMode) {}
+    override fun onModeSwitchError(error: String) {}
+}
+
+class ModePersistenceStub : IModePersistence {
+    override suspend fun saveMode(mode: ProcessingMode, config: ModeConfig) {}
+    override suspend fun loadMode(): Pair<ProcessingMode, ModeConfig>? = null
+    override suspend fun clearMode() {}
+}
+
+class ModeMonitorStub : IModeMonitor {
+    override fun recordModeSwitch(fromMode: ProcessingMode, toMode: ProcessingMode, duration: Long) {}
+    override fun recordModeUsage(mode: ProcessingMode, metrics: ModeMetrics) {}
+    override fun getModeStatistics(mode: ProcessingMode) = ModeStatistics(
+        totalUsageTime = 0,
+        switchCount = 0,
+        averageSwitchDuration = 0,
+        successRate = 0f,
+        metrics = ModeMetrics(
+            requestCount = 0,
+            successRate = 0f,
+            averageLatency = 0,
+            errorCount = 0,
+            resourceUsage = ResourceUsage(
+                cpuUsage = 0f,
+                memoryUsage = 0,
+                networkUsage = 0,
+                batteryImpact = 0f
+            )
+        )
+    )
+}
+
+// 在需要的地方直接 new 这些 Stub 类用于依赖注入或 UI 预览

@@ -1,9 +1,13 @@
 package com.xuatseg.yuanyin.core
 
+import com.xuatseg.yuanyin.bluetooth.BluetoothServiceConfig
 import com.xuatseg.yuanyin.bluetooth.IBluetoothService
+import com.xuatseg.yuanyin.chat.ChatMessage
 import com.xuatseg.yuanyin.chat.IChatInterface
 import com.xuatseg.yuanyin.embedding.IEmbeddingService
 import com.xuatseg.yuanyin.engine.IRuleEngine
+import com.xuatseg.yuanyin.engine.ProcessorType
+import com.xuatseg.yuanyin.engine.RuleInput
 import com.xuatseg.yuanyin.llm.ILLMService
 import com.xuatseg.yuanyin.mode.IModeManager
 import com.xuatseg.yuanyin.robot.IRobotControl
@@ -11,7 +15,6 @@ import com.xuatseg.yuanyin.storage.IStorageManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 
@@ -79,148 +82,115 @@ class RobotCoreService(
      * 初始化蓝牙服务
      */
     private suspend fun initializeBluetooth() {
-        // 示例：初始化蓝牙服务
-        bluetoothService.initialize(BluetoothServiceConfig(
-            serviceUUID = "your-service-uuid",
-            characteristicUUID = "your-characteristic-uuid"
-        ))
+        // TODO: 初始化蓝牙服务（未实现 BluetoothServiceConfig）
+        // bluetoothService.initialize(
+        //     BluetoothServiceConfig(
+        //         serviceUUID = "your-service-uuid",
+        //         characteristicUUID = "your-characteristic-uuid"
+        //     )
+        // )
     }
 
     /**
      * 初始化机器人控制
      */
     private suspend fun initializeRobotControl() {
-        // 示例：启动机器人控制系统
-        robotControl.getRobotState()
-
-        // 示例：监听机器人状态
-        serviceScope.launch {
-            robotControl.observeState().collect { state ->
-                handleRobotStateChange(state)
-            }
-        }
+        // TODO: 启动机器人控制系统
+        // robotControl.getRobotState()
+        // serviceScope.launch {
+        //     robotControl.observeState().collect { state ->
+        //         handleRobotStateChange(state)
+        //     }
+        // }
     }
 
     /**
      * 初始化AI模型
      */
     private suspend fun initializeAIModels() {
-        // 示例：初始化嵌入模型
-        embeddingService.loadModel(EmbeddingModelConfig(
-            modelPath = "path/to/model",
-            dimension = 768,
-            quantization = QuantizationType.INT8,
-            deviceType = DeviceType.CPU,
-            batchSize = 1,
-            threads = 4
-        ))
-
-        // 示例：设置LLM服务配置
-        llmService.initialize(LLMConfig(
-            apiKey = "your-api-key",
-            modelName = "your-model",
-            temperature = 0.7f
-        ))
+        // TODO: 初始化嵌入模型和LLM服务（未实现 EmbeddingModelConfig、QuantizationType、DeviceType、LLMConfig）
+        // embeddingService.loadModel(EmbeddingModelConfig(...))
+        // llmService.initialize(LLMConfig(...))
     }
 
     /**
      * 初始化规则引擎
      */
     private suspend fun initializeRuleEngine() {
-        // 示例：添加基本规则
-        ruleEngine.addRule(createBasicRules())
-
-        // 示例：启动规则评估
-        serviceScope.launch {
-            observeUserInput().collect { input ->
-                val decision = ruleEngine.evaluate(input)
-                handleProcessingDecision(decision)
-            }
-        }
+        // TODO: 添加基本规则和规则评估（未实现 createBasicRules、observeUserInput、handleProcessingDecision）
+        // ruleEngine.addRule(createBasicRules())
+        // serviceScope.launch {
+        //     observeUserInput().collect { input ->
+        //         val decision = ruleEngine.evaluate(input)
+        //         handleProcessingDecision(decision)
+        //     }
+        // }
     }
 
     /**
      * 处理用户输入
      */
     private suspend fun handleUserInput(input: String) {
-        try {
-            // 1. 评估处理方式
-            val decision = ruleEngine.evaluate(RuleInput(input))
-
-            // 2. 根据决策处理输入
-            when (decision.processor) {
-                ProcessorType.LOCAL_EMBEDDING -> handleLocalProcessing(input)
-                ProcessorType.LLM_API -> handleLLMProcessing(input)
-                ProcessorType.HYBRID -> handleHybridProcessing(input)
-            }
-
-            // 3. 保存对话历史
-            storageManager.getDatabase().getChatStorage().saveMessage(
-                ChatMessage(/* 消息详情 */)
-            )
-        } catch (e: Exception) {
-            handleError(e)
-        }
+        // TODO: 评估处理方式和保存对话历史（未实现 RuleInput、ProcessorType、ChatMessage、handleError）
+        // try {
+        //     val decision = ruleEngine.evaluate(RuleInput(input))
+        //     when (decision.processor) {
+        //         ProcessorType.LOCAL_EMBEDDING -> handleLocalProcessing(input)
+        //         ProcessorType.LLM_API -> handleLLMProcessing(input)
+        //         ProcessorType.HYBRID -> handleHybridProcessing(input)
+        //     }
+        //     storageManager.getDatabase().getChatStorage().saveMessage(ChatMessage(/* ... */))
+        // } catch (e: Exception) {
+        //     handleError(e)
+        // }
     }
 
     /**
      * 处理本地处理逻辑
      */
     private suspend fun handleLocalProcessing(input: String) {
-        // 示例：使用嵌入模型处理
-        val embedding = embeddingService.generateEmbedding(input)
-        val results = embeddingService.searchSimilar(embedding, limit = 5)
-        // 处理结果...
+        // TODO: 使用嵌入模型处理
+        // val embedding = embeddingService.generateEmbedding(input)
+        // val results = embeddingService.searchSimilar(embedding, limit = 5)
     }
 
     /**
      * 处理LLM处理逻辑
      */
     private suspend fun handleLLMProcessing(input: String) {
-        // 示例：使用LLM处理
-        val request = LLMRequest(
-            messages = listOf(LLMMessage(role = MessageRole.USER, content = input)),
-            parameters = LLMParameters(temperature = 0.7f)
-        )
-        llmService.chat(request).collect { response ->
-            handleLLMResponse(response)
-        }
+        // TODO: 使用LLM处理（未实现 LLMRequest、LLMMessage、MessageRole、LLMParameters、handleLLMResponse）
+        // val request = LLMRequest(...)
+        // llmService.chat(request).collect { response ->
+        //     handleLLMResponse(response)
+        // }
     }
 
     /**
      * 处理混合处理逻辑
      */
     private suspend fun handleHybridProcessing(input: String) {
-        // 示例：结合本地和LLM处理
-        val embedding = embeddingService.generateEmbedding(input)
-        val localResults = embeddingService.searchSimilar(embedding, limit = 3)
-
-        // 将本地结果作为上下文发送给LLM
-        val context = formatLocalResults(localResults)
-        val request = createLLMRequestWithContext(input, context)
-        llmService.chat(request).collect { response ->
-            handleLLMResponse(response)
-        }
+        // TODO: 结合本地和LLM处理（未实现 formatLocalResults、createLLMRequestWithContext、handleLLMResponse）
+        // val embedding = embeddingService.generateEmbedding(input)
+        // val localResults = embeddingService.searchSimilar(embedding, limit = 3)
+        // val context = formatLocalResults(localResults)
+        // val request = createLLMRequestWithContext(input, context)
+        // llmService.chat(request).collect { response ->
+        //     handleLLMResponse(response)
+        // }
     }
 
     /**
      * 处理机器人控制命令
      */
-    private suspend fun handleRobotCommand(command: RobotCommand) {
-        try {
-            // 1. 验证命令
-            validateCommand(command)
-
-            // 2. 执行命令
-            robotControl.executeCommand(command)
-
-            // 3. 记录命令执行
-            storageManager.getDatabase().getSensorStorage().saveSensorData(
-                /* 命令执行结果 */
-            )
-        } catch (e: Exception) {
-            handleError(e)
-        }
+    private suspend fun handleRobotCommand(command: Any) {
+        // TODO: 处理机器人控制命令（未实现 RobotCommand、validateCommand、handleError）
+        // try {
+        //     validateCommand(command)
+        //     robotControl.executeCommand(command)
+        //     storageManager.getDatabase().getSensorStorage().saveSensorData(/* ... */)
+        // } catch (e: Exception) {
+        //     handleError(e)
+        // }
     }
 
     /**

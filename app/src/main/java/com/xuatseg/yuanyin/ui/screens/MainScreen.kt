@@ -10,9 +10,12 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import com.xuatseg.yuanyin.core.IRobotStateManager
 import com.xuatseg.yuanyin.model.WorkMode
 import com.xuatseg.yuanyin.mode.ProcessingMode
+import com.xuatseg.yuanyin.robot.RobotState
 import com.xuatseg.yuanyin.robot.SensorType
+import com.xuatseg.yuanyin.robot.SpeedCommand
 import com.xuatseg.yuanyin.ui.control.*
 import com.xuatseg.yuanyin.ui.mode.*
 import com.xuatseg.yuanyin.viewmodel.MainViewModel
@@ -30,7 +33,7 @@ fun MainScreen(
         availableModes = listOf()
     ))
     val robotControlUiState by robotControlViewModel.getUiState().collectAsState(initial = RobotControlUiState(
-        robotState = robotControlViewModel.getSystemHealth().let { viewModel.getRobotState() },
+        robotState = robotControlViewModel.getCurrentRobotState(),
         sensorData = robotControlViewModel.getSensorData(),
         systemHealth = robotControlViewModel.getSystemHealth(),
         isConnected = false
@@ -64,14 +67,14 @@ fun MainScreen(
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             // 状态栏
-            Row(
+            Column (
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
+                verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 // 模式状态指示器
                 ModeStatusIndicator(
                     modeState = modeSwitchViewModel.getCurrentModeState(),
-                    modifier = Modifier.weight(1f)
+                    showDetails = true
                 )
 
                 // 电池状态
