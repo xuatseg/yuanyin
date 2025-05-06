@@ -1,0 +1,564 @@
+---
+description: 
+globs: 
+alwaysApply: false
+---
+# 存储模块接口设计
+
+## 接口设计原则
+
+存储模块的接口设计遵循以下原则：
+
+1. **面向接口编程**：所有组件通过接口而非具体实现进行交互
+2. **单一职责**：每个接口专注于特定的功能领域
+3. **可组合性**：接口设计支持灵活组合，实现复杂功能
+4. **反应式**：优先提供Flow版本的查询方法，支持数据变化的自动传播
+5. **协程支持**：所有阻塞操作都设计为挂起函数，配合协程使用
+6. **上下文接收器**：利用Kotlin 2.0的上下文接收器特性设计更流畅的API
+
+## 核心接口
+
+### 1. 存储管理器接口 (IStorageManager)
+
+作为整个存储模块的主入口点，提供存储系统的生命周期管理和子组件访问。
+
+```kotlin
+interface IStorageManager {
+    // 存储系统生命周期管理
+    suspend fun initialize()
+    suspend fun shutdown()
+    
+    // 获取子组件
+    fun getDatabase(): IDatabase
+    fun getFileStorage(): IFileStorage
+    fun <T : Any> getRepository(entityClass: KClass<T>): IRepository<T>
+    fun getResourceMonitor(): IResourceMonitor
+    
+    // 存储系统管理
+    suspend fun performMaintenance()
+    fun getStorageStatus(): StorageStatus
+    
+    // 存储策略相关
+    fun getCurrentStorageStrategy(): StorageStrategy
+    fun observeStorageStrategy(): Flow<StorageStrategy>
+    
+    // 事件通知
+    fun observeStorageEvents(): Flow<StorageEvent>
+}
+```
+
+### 2. 存储库接口 (IRepository)
+
+提供针对特定数据类型的CRUD操作和查询功能，是应用层访问数据的主要方式。
+
+```kotlin
+interface IRepository<T : Any> {
+    // 基本CRUD操作
+    suspend fun insert(item: T): Any
+    suspend fun update(item: T): Int
+    suspend fun delete(item: T): Int
+    suspend fun getById(id: Any): T?
+    suspend fun getAll(): List<T>
+    suspend fun count(): Int
+    
+    // 批量操作
+    suspend fun insertAll(items: List<T>): List<Any>
+    suspend fun updateAll(items: List<T>): Int
+    suspend fun deleteAll(items: List<T>): Int
+    
+    // 反应式查询
+    fun observeById(id: Any): Flow<T?>
+    fun observeAll(): Flow<List<T>>
+    fun observeCount(): Flow<Int>
+    fun observeQuery(query: Query<T>): Flow<List<T>>
+    
+    // 事务支持
+    suspend fun <R> withTransaction(block: suspend CoroutineScope.() -> R): R
+}
+```
+
+### 3. 数据库接口 (IDatabase)
+
+提供对数据库的底层访问，支持SQL执行和事务处理。
+
+```kotlin
+interface IDatabase {
+    // SQL操作
+    suspend fun query(sql: String, args: List<Any>? = null): List<Map<String, Any?>>
+    suspend fun execute(sql: String, args: List<Any>? = null): Int
+    
+    // 事务支持
+    suspend fun <R> withTransaction(block: suspend CoroutineScope.() -> R): R
+    
+    // 查询构建
+    fun createQuery(sql: String, args: List<Any>? = null): Query
+    fun <T : Any> createDao(entityClass: KClass<T>): Dao<T>
+    
+    // 状态与维护
+    fun getStatus(): DatabaseStatus
+    suspend fun vacuum()
+    suspend fun analyze()
+    
+    // 关闭数据库
+    fun close()
+}
+```
+
+### 4. 文件存储接口 (IFileStorage)
+
+提供文件系统操作，支持媒体文件和大型二进制数据的存储和检索。
+
+```kotlin
+interface IFileStorage {
+    // 基本文件操作
+    suspend fun saveFile(path: String, data: ByteArray): String
+    suspend fun loadFile(path: String): ByteArray?
+    suspend fun deleteFile(path: String): Boolean
+    suspend fun fileExists(path: String): Boolean
+    
+    // 文件元数据
+    suspend fun getFileMetadata(path: String): FileMetadata?
+    suspend fun listFiles(directory: String, pattern: String? = null): List<FileInfo>
+    
+    // 文件管理
+    suspend fun moveFile(sourcePath: String, targetPath: String): Boolean
+    suspend fun copyFile(sourcePath: String, targetPath: String): Boolean
+    suspend fun getFileUri(path: String): Uri
+    suspend fun deleteFilesByPattern(pattern: String, olderThan: Duration? = null): Int
+    
+    // 状态与维护
+    fun getStatus(): FileSystemStatus
+    suspend fun getStorageStats(): StorageStats
+    suspend fun cleanup()
+}
+```
+
+### 5. 资源监控接口 (IResourceMonitor)
+
+监控设备资源状态，为存储策略决策提供依据。
+
+```kotlin
+interface IResourceMonitor {
+    // 资源状态流
+    val storageStatus: StateFlow<StorageStatus>
+    val networkStatus: StateFlow<NetworkStatus>
+    val batteryStatus: StateFlow<BatteryStatus>
+    val memoryStatus: StateFlow<MemoryStatus>
+    
+    // 控制监控
+    fun startMonitoring()
+    fun stopMonitoring()
+    
+    // 获取当前状态
+    fun getLastStorageStatus(): StorageStatus
+    fun getLastNetworkStatus(): NetworkStatus
+    fun getLastBatteryStatus(): BatteryStatus
+    fun getLastMemoryStatus(): MemoryStatus
+}
+```
+
+### 6. 存储策略引擎接口 (IStorageStrategyEngine)
+
+根据资源状态确定最佳存储策略，控制整个存储系统的行为。
+
+```kotlin
+interface IStorageStrategyEngine {
+    // 当前策略流
+    val currentStrategy: StateFlow<StorageStrategy>
+    
+    // 策略控制
+    fun getCurrentStrategy(): StorageStrategy
+    fun setStrategy(strategy: StorageStrategy)
+    fun resetToAutoStrategy()
+    
+    // 策略信息
+    fun getAvailableStrategies(): List<StorageStrategy>
+    fun observeStrategyEvents(): Flow<StrategyEvent>
+}
+```
+
+### 7. 缓存管理接口 (ICacheManager)
+
+管理内存缓存，优化频繁访问数据的性能。
+
+```kotlin
+interface ICacheManager {
+    // 缓存操作
+    fun <K : Any, V : Any> getCache(name: String, maxSize: Int): Cache<K, V>
+    suspend fun clearCache(name: String): Boolean
+    suspend fun clearAllCaches(): Boolean
+    
+    // 缓存调整
+    fun getCacheStats(): Map<String, CacheStats>
+    suspend fun adjustCacheSize(name: String, newMaxSize: Int): Boolean
+    fun onLowMemory()
+}
+```
+
+### 8. 数据留存管理接口 (IDataRetentionManager)
+
+管理数据生命周期，实现自动清理和压缩策略。
+
+```kotlin
+interface IDataRetentionManager {
+    // 留存操作
+    suspend fun performRetention(level: RetentionLevel = RetentionLevel.NORMAL): RetentionResult
+    
+    // 策略管理
+    suspend fun getRetentionPolicies(): List<RetentionPolicy>
+    suspend fun updateRetentionPolicy(policy: RetentionPolicy): Boolean
+    
+    // 状态与事件
+    fun getLastRetentionResult(): RetentionResult?
+    fun observeRetentionEvents(): Flow<RetentionEvent>
+}
+```
+
+## 数据接口
+
+### 1. 查询接口 (Query)
+
+提供构建和执行数据库查询的功能。
+
+```kotlin
+interface Query {
+    // 查询元数据
+    val sql: String
+    val args: List<Any>?
+    
+    // 执行查询
+    suspend fun execute(): List<Map<String, Any?>>
+    fun asFlow(): Flow<List<Map<String, Any?>>>
+    
+    // 泛型查询
+    interface Query<T : Any> {
+        // 查询条件构建
+        fun whereEqualTo(field: String, value: Any): Query<T>
+        fun whereGreaterThan(field: String, value: Any): Query<T>
+        fun whereLessThan(field: String, value: Any): Query<T>
+        fun whereGreaterThanOrEqualTo(field: String, value: Any): Query<T>
+        fun whereLessThanOrEqualTo(field: String, value: Any): Query<T>
+        fun orderBy(field: String, descending: Boolean = false): Query<T>
+        fun limit(limit: Int): Query<T>
+        fun offset(offset: Int): Query<T>
+        
+        // 执行查询
+        suspend fun get(): List<T>
+        fun observe(): Flow<List<T>>
+    }
+}
+```
+
+### 2. DAO接口 (Dao)
+
+提供针对特定实体的数据访问操作。
+
+```kotlin
+interface Dao<T : Any> {
+    // 基本CRUD
+    suspend fun insert(entity: T): Long
+    suspend fun update(entity: T): Int
+    suspend fun delete(entity: T): Int
+    suspend fun findById(id: Any): T?
+    
+    // 批量操作
+    suspend fun insertAll(entities: List<T>): List<Long>
+    suspend fun updateAll(entities: List<T>): Int
+    suspend fun deleteAll(entities: List<T>): Int
+    
+    // 查询
+    suspend fun findAll(): List<T>
+    suspend fun count(): Int
+    
+    // 自定义查询
+    suspend fun query(sql: String, args: List<Any>? = null): List<T>
+    
+    // 反应式查询
+    fun observeById(id: Any): Flow<T?>
+    fun observeAll(): Flow<List<T>>
+    fun observeCount(): Flow<Int>
+    fun observeQuery(sql: String, args: List<Any>? = null): Flow<List<T>>
+}
+```
+
+## 模型接口
+
+### 1. 存储策略 (StorageStrategy)
+
+定义存储系统的行为模式。
+
+```kotlin
+sealed class StorageStrategy {
+    // 正常策略 - 平衡性能和资源使用
+    object Normal : StorageStrategy()
+    
+    // 存储空间危急 - 激进清理临时文件，压缩存储
+    object StorageCritical : StorageStrategy()
+    
+    // 离线模式 - 优先本地操作，推迟同步
+    object Offline : StorageStrategy()
+    
+    // 省电模式 - 减少后台操作，延长同步间隔
+    object PowerSaving : StorageStrategy()
+}
+```
+
+### 2. 资源状态模型
+
+描述设备资源的当前状态。
+
+```kotlin
+// 存储状态
+sealed class StorageStatus {
+    object Unknown : StorageStatus()
+    data class Available(
+        val availableBytes: Long,
+        val totalBytes: Long,
+        val usagePercentage: Float
+    ) : StorageStatus()
+}
+
+// 网络状态
+sealed class NetworkStatus {
+    object Unknown : NetworkStatus()
+    object Connected : NetworkStatus()
+    object Disconnected : NetworkStatus()
+}
+
+// 电池状态
+sealed class BatteryStatus {
+    object Unknown : BatteryStatus()
+    data class Low(val percentage: Float, val isCharging: Boolean) : BatteryStatus()
+    data class Medium(val percentage: Float, val isCharging: Boolean) : BatteryStatus()
+    data class High(val percentage: Float, val isCharging: Boolean) : BatteryStatus()
+    object PowerSaveMode : BatteryStatus()
+}
+
+// 内存状态
+sealed class MemoryStatus {
+    object Unknown : MemoryStatus()
+    data class Available(
+        val availableBytes: Long,
+        val totalBytes: Long,
+        val usagePercentage: Float,
+        val isLowMemory: Boolean,
+        val threshold: Long
+    ) : MemoryStatus()
+}
+```
+
+### 3. 事件模型
+
+定义存储系统中的各种事件。
+
+```kotlin
+// 存储事件
+sealed class StorageEvent {
+    data class Initialized(val timestamp: Instant) : StorageEvent()
+    data class Shutdown(val timestamp: Instant) : StorageEvent()
+    data class MaintenanceCompleted(val timestamp: Instant) : StorageEvent()
+    data class StrategyChanged(val strategy: StorageStrategy) : StorageEvent()
+    data class ErrorEvent(val error: String, val timestamp: Instant) : StorageEvent()
+}
+
+// 策略事件
+sealed class StrategyEvent {
+    data class StrategyChanged(val oldStrategy: StorageStrategy, val newStrategy: StorageStrategy, val source: StrategySource) : StrategyEvent()
+    data class ThresholdCrossed(val resourceType: ResourceType, val threshold: Float, val currentValue: Float) : StrategyEvent()
+}
+
+// 留存事件
+sealed class RetentionEvent {
+    data class RetentionStarted(val level: RetentionLevel, val timestamp: Instant) : RetentionEvent()
+    data class RetentionCompleted(val result: RetentionResult, val timestamp: Instant) : RetentionEvent()
+    data class RetentionFailed(val error: String, val timestamp: Instant) : RetentionEvent()
+}
+```
+
+## 工具接口
+
+### 1. 查询构建器 (QueryBuilder)
+
+提供流畅的API构建数据库查询。
+
+```kotlin
+interface QueryBuilder<T : Any> {
+    // 条件构建
+    fun where(condition: String, vararg args: Any): QueryBuilder<T>
+    fun whereEquals(field: String, value: Any): QueryBuilder<T>
+    fun whereGreaterThan(field: String, value: Any): QueryBuilder<T>
+    fun whereLessThan(field: String, value: Any): QueryBuilder<T>
+    
+    // 排序
+    fun orderBy(field: String, direction: SortDirection = SortDirection.ASC): QueryBuilder<T>
+    
+    // 分页
+    fun limit(count: Int): QueryBuilder<T>
+    fun offset(count: Int): QueryBuilder<T>
+    
+    // 构建查询
+    fun build(): Query<T>
+}
+```
+
+### 2. 事务作用域 (TransactionScope)
+
+利用上下文接收器提供事务操作的流畅API。
+
+```kotlin
+@JvmInline
+value class TransactionScope<T : Any>(
+    val repository: IRepository<T>
+) {
+    // 在事务作用域内进行CRUD操作
+    suspend fun insert(item: T): Any
+    suspend fun update(item: T): Int
+    suspend fun delete(item: T): Int
+    suspend fun getById(id: Any): T?
+    
+    // 跨表操作支持
+    suspend fun <R : Any> getRepository(entityClass: KClass<R>): IRepository<R>
+}
+```
+
+## 使用DSL
+
+通过Kotlin 2.0的上下文接收器特性，我们可以设计出更加流畅的DSL风格API：
+
+```kotlin
+// 事务DSL
+context(CoroutineScope)
+suspend fun <T : Any> IRepository<T>.execute(
+    block: context(TransactionScope<T>) suspend () -> Unit
+) {
+    withTransaction {
+        val scope = TransactionScope<T>(this@IRepository)
+        block(scope)
+    }
+}
+
+// 查询DSL
+context(CoroutineScope)
+fun <T : Any> IRepository<T>.query(
+    builder: context(QueryBuilder<T>) () -> Unit
+): Flow<List<T>> {
+    val queryBuilder = QueryBuilderImpl<T>()
+    builder(queryBuilder)
+    return observeQuery(queryBuilder.build())
+}
+```
+
+## 接口使用示例
+
+以下是一些接口使用的示例代码，展示了API的流畅性和可组合性：
+
+### 基本存储操作
+
+```kotlin
+// 获取存储管理器
+val storageManager: IStorageManager = StorageManagerProvider.get()
+
+// 初始化存储
+storageManager.initialize()
+
+// 获取用户存储库
+val userRepository = storageManager.getRepository(User::class)
+
+// 创建新用户
+val userId = userRepository.insert(User(name = "示例用户", avatarUrl = "https://example.com/avatar.png"))
+
+// 观察用户数据
+viewModelScope.launch {
+    userRepository.observeById(userId).collect { user ->
+        // 更新UI
+    }
+}
+```
+
+### 事务示例
+
+```kotlin
+// 使用事务执行多表操作
+viewModelScope.launch {
+    meetingRepository.execute {
+        // 创建会议
+        val meeting = Meeting(
+            title = "产品讨论会",
+            startTime = Clock.System.now()
+        )
+        val meetingId = insert(meeting)
+        
+        // 添加发言者
+        val speakerRepo = getRepository(Speaker::class)
+        speakerRepo.execute {
+            val speaker1Id = insert(Speaker(meetingId = meetingId, name = "张三"))
+            val speaker2Id = insert(Speaker(meetingId = meetingId, name = "李四"))
+            
+            // 添加转写片段
+            val transcriptionRepo = getRepository(TranscriptionSegment::class)
+            transcriptionRepo.execute {
+                insert(TranscriptionSegment(
+                    meetingId = meetingId,
+                    speakerId = speaker1Id,
+                    text = "我们讨论一下新功能",
+                    startTimeMs = 0,
+                    endTimeMs = 3000
+                ))
+                
+                insert(TranscriptionSegment(
+                    meetingId = meetingId,
+                    speakerId = speaker2Id,
+                    text = "好的，我先介绍一下需求",
+                    startTimeMs = 3500,
+                    endTimeMs = 7000
+                ))
+            }
+        }
+    }
+}
+```
+
+### 查询示例
+
+```kotlin
+// 使用查询DSL构建复杂查询
+viewModelScope.launch {
+    messageRepository.query {
+        whereGreaterThan("timestamp", todayStart)
+        whereLessThan("timestamp", todayEnd)
+        whereEquals("conversationId", activeConversationId)
+        orderBy("timestamp", SortDirection.DESC)
+        limit(50)
+    }.collect { messages ->
+        // 更新UI
+    }
+}
+```
+
+### 资源适应示例
+
+```kotlin
+// 监听存储策略变化，调整UI行为
+viewModelScope.launch {
+    storageManager.observeStorageStrategy().collect { strategy ->
+        when (strategy) {
+            is StorageStrategy.Normal -> {
+                // 正常加载高质量媒体
+                loadHighQualityMedia()
+            }
+            is StorageStrategy.StorageCritical, 
+            is StorageStrategy.PowerSaving -> {
+                // 加载低质量媒体，减少资源消耗
+                loadLowQualityMedia()
+            }
+            is StorageStrategy.Offline -> {
+                // 仅显示已缓存内容
+                loadCachedMediaOnly()
+            }
+        }
+    }
+}
+```
+
+通过这些设计良好的接口，存储模块提供了强大而灵活的数据管理能力，同时保持了API的一致性和易用性，使应用开发者能够专注于业务逻辑而不是存储细节。
+

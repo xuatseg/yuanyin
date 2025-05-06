@@ -1,0 +1,644 @@
+---
+description: 
+globs: 
+alwaysApply: false
+---
+# 存储模块数据库表设计
+
+## 设计原则
+
+存储模块的数据库设计遵循以下原则：
+
+1. **实体完整性**：每个表都有明确的主键，确保数据唯一性
+2. **引用完整性**：使用外键约束维护表之间的关系
+3. **适当索引**：为常用查询条件创建索引，优化查询性能
+4. **规范化设计**：遵循数据库范式，减少数据冗余
+5. **扩展性考虑**：预留元数据字段，支持未来功能扩展
+6. **时间戳记录**：关键操作都记录时间戳，便于跟踪和同步
+
+## 核心数据库表
+
+### 1. 用户相关表
+
+#### User 表
+
+存储用户基本信息。
+
+```sql
+CREATE TABLE User (
+    userId TEXT PRIMARY KEY,             -- 用户唯一标识
+    name TEXT NOT NULL,                  -- 用户名称
+    avatarUrl TEXT,                      -- 头像URL
+    lastLogin INTEGER,                   -- 最后登录时间（时间戳）
+    createdAt INTEGER NOT NULL           -- 创建时间（时间戳）
+)
+```
+
+索引：
+- `CREATE INDEX idx_user_createdAt ON User(createdAt)`
+
+#### UserPreference 表
+
+存储用户个性化配置。
+
+```sql
+CREATE TABLE UserPreference (
+    preferenceId INTEGER PRIMARY KEY AUTOINCREMENT,  -- 自增主键
+    userId TEXT NOT NULL,                            -- 用户ID
+    key TEXT NOT NULL,                               -- 配置键
+    value TEXT NOT NULL,                             -- 配置值
+    updatedAt INTEGER NOT NULL,                      -- 更新时间（时间戳）
+    FOREIGN KEY (userId) REFERENCES User(userId) ON DELETE CASCADE,
+    UNIQUE (userId, key)                             -- 用户的每个配置键唯一
+)
+```
+
+索引：
+- `CREATE INDEX idx_userpref_userId ON UserPreference(userId)`
+
+### 2. 对话/消息相关表
+
+#### Conversation 表
+
+存储对话会话信息。
+
+```sql
+CREATE TABLE Conversation (
+    conversationId TEXT PRIMARY KEY,     -- 会话唯一标识
+    title TEXT,                          -- 会话标题
+    createdAt INTEGER NOT NULL,          -- 创建时间（时间戳）
+    updatedAt INTEGER NOT NULL,          -- 更新时间（时间戳）
+    type TEXT NOT NULL,                  -- 会话类型：'single', 'group', 'meeting'等
+    metadata TEXT                        -- 元数据（JSON格式）
+)
+```
+
+索引：
+- `CREATE INDEX idx_conversation_updatedAt ON Conversation(updatedAt)`
+- `CREATE INDEX idx_conversation_type ON Conversation(type)`
+
+#### Message 表
+
+存储消息内容。
+
+```sql
+CREATE TABLE Message (
+    msgId TEXT PRIMARY KEY,              -- 消息唯一标识
+    conversationId TEXT NOT NULL,        -- 所属会话ID
+    senderId TEXT NOT NULL,              -- 发送者ID
+    content TEXT NOT NULL,               -- 消息内容
+    timestamp INTEGER NOT NULL,          -- 发送时间（时间戳）
+    type TEXT NOT NULL,                  -- 消息类型：'text', 'image', 'audio', 'system'等
+    status TEXT NOT NULL,                -- 消息状态：'sending', 'sent', 'delivered', 'read', 'failed'
+    metadata TEXT,                       -- 元数据（JSON格式）
+    FOREIGN KEY (conversationId) REFERENCES Conversation(conversationId) ON DELETE CASCADE
+)
+```
+
+索引：
+- `CREATE INDEX idx_message_conversationId ON Message(conversationId)`
+- `CREATE INDEX idx_message_timestamp ON Message(timestamp)`
+- `CREATE INDEX idx_message_senderId ON Message(senderId)`
+- `CREATE INDEX idx_message_conversation_time ON Message(conversationId, timestamp)`
+
+### 3. 会议记录相关表
+
+#### Meeting 表
+
+存储会议基本信息。
+
+```sql
+CREATE TABLE Meeting (
+    meetingId TEXT PRIMARY KEY,          -- 会议唯一标识
+    title TEXT NOT NULL,                 -- 会议标题
+    startTime INTEGER NOT NULL,          -- 开始时间（时间戳）
+    endTime INTEGER,                     -- 结束时间（时间戳），可为空表示进行中
+    status TEXT NOT NULL,                -- 会议状态：'scheduled', 'ongoing', 'completed', 'cancelled'
+    metadata TEXT                        -- 元数据（JSON格式）
+)
+```
+
+索引：
+- `CREATE INDEX idx_meeting_startTime ON Meeting(startTime)`
+- `CREATE INDEX idx_meeting_status ON Meeting(status)`
+
+#### Speaker 表
+
+存储会议发言者信息。
+
+```sql
+CREATE TABLE Speaker (
+    speakerId TEXT PRIMARY KEY,          -- 发言者唯一标识
+    meetingId TEXT NOT NULL,             -- 所属会议ID
+    name TEXT NOT NULL,                  -- 发言者姓名
+    FOREIGN KEY (meetingId) REFERENCES Meeting(meetingId) ON DELETE CASCADE
+)
+```
+
+索引：
+- `CREATE INDEX idx_speaker_meetingId ON Speaker(meetingId)`
+
+#### TranscriptionSegment 表
+
+存储会议转写片段。
+
+```sql
+CREATE TABLE TranscriptionSegment (
+    segmentId TEXT PRIMARY KEY,          -- 片段唯一标识
+    meetingId TEXT NOT NULL,             -- 所属会议ID
+    speakerId TEXT,                      -- 发言者ID，可为空
+    text TEXT NOT NULL,                  -- 转写文本
+    startTimeMs INTEGER NOT NULL,        -- 开始时间（毫秒）
+    endTimeMs INTEGER NOT NULL,          -- 结束时间（毫秒）
+    confidence REAL,                     -- 置信度
+    FOREIGN KEY (meetingId) REFERENCES Meeting(meetingId) ON DELETE CASCADE,
+    FOREIGN KEY (speakerId) REFERENCES Speaker(speakerId) ON DELETE SET NULL
+)
+```
+
+索引：
+- `CREATE INDEX idx_transcription_meetingId ON TranscriptionSegment(meetingId)`
+- `CREATE INDEX idx_transcription_speakerId ON TranscriptionSegment(speakerId)`
+- `CREATE INDEX idx_transcription_timeRange ON TranscriptionSegment(meetingId, startTimeMs, endTimeMs)`
+
+### 4. 多模态识别相关表
+
+#### MediaFile 表
+
+存储媒体文件元数据。
+
+```sql
+CREATE TABLE MediaFile (
+    fileId TEXT PRIMARY KEY,             -- 文件唯一标识
+    path TEXT NOT NULL,                  -- 文件路径
+    mimeType TEXT NOT NULL,              -- MIME类型
+    size INTEGER NOT NULL,               -- 文件大小（字节）
+    duration INTEGER,                    -- 时长（毫秒），适用于音频/视频
+    width INTEGER,                       -- 宽度（像素），适用于图像/视频
+    height INTEGER,                      -- 高度（像素），适用于图像/视频
+    createdAt INTEGER NOT NULL,          -- 创建时间（时间戳）
+    metadata TEXT                        -- 元数据（JSON格式）
+)
+```
+
+索引：
+- `CREATE INDEX idx_mediafile_mimeType ON MediaFile(mimeType)`
+- `CREATE INDEX idx_mediafile_createdAt ON MediaFile(createdAt)`
+
+#### RecognitionResult 表
+
+存储识别结果。
+
+```sql
+CREATE TABLE RecognitionResult (
+    resultId TEXT PRIMARY KEY,           -- 结果唯一标识
+    mediaFileId TEXT,                    -- 关联的媒体文件ID，可为空
+    type TEXT NOT NULL,                  -- 识别类型：'face', 'object', 'speech', 'text'等
+    payloadJson TEXT NOT NULL,           -- 识别结果（JSON格式）
+    confidence REAL,                     -- 置信度
+    createdAt INTEGER NOT NULL,          -- 创建时间（时间戳）
+    FOREIGN KEY (mediaFileId) REFERENCES MediaFile(fileId) ON DELETE SET NULL
+)
+```
+
+索引：
+- `CREATE INDEX idx_recognition_mediaFileId ON RecognitionResult(mediaFileId)`
+- `CREATE INDEX idx_recognition_type ON RecognitionResult(type)`
+- `CREATE INDEX idx_recognition_createdAt ON RecognitionResult(createdAt)`
+
+### 5. 设备连接相关表
+
+#### Device 表
+
+存储设备信息。
+
+```sql
+CREATE TABLE Device (
+    deviceId TEXT PRIMARY KEY,           -- 设备唯一标识
+    name TEXT NOT NULL,                  -- 设备名称
+    type TEXT NOT NULL,                  -- 设备类型：'robot', 'phone', 'tablet'等
+    lastPaired INTEGER,                  -- 最后配对时间（时间戳）
+    metadata TEXT                        -- 元数据（JSON格式）
+)
+```
+
+索引：
+- `CREATE INDEX idx_device_type ON Device(type)`
+- `CREATE INDEX idx_device_lastPaired ON Device(lastPaired)`
+
+#### ConnectionStatus 表
+
+存储设备连接状态历史。
+
+```sql
+CREATE TABLE ConnectionStatus (
+    statusId INTEGER PRIMARY KEY AUTOINCREMENT,  -- 自增主键
+    deviceId TEXT NOT NULL,                      -- 设备ID
+    status TEXT NOT NULL,                        -- 连接状态：'connected', 'disconnected', 'pairing', 'failed'
+    timestamp INTEGER NOT NULL,                  -- 状态记录时间（时间戳）
+    details TEXT,                                -- 连接详情或错误信息
+    FOREIGN KEY (deviceId) REFERENCES Device(deviceId) ON DELETE CASCADE
+)
+```
+
+索引：
+- `CREATE INDEX idx_connection_deviceId ON ConnectionStatus(deviceId)`
+- `CREATE INDEX idx_connection_timestamp ON ConnectionStatus(timestamp)`
+- `CREATE INDEX idx_connection_status ON ConnectionStatus(status)`
+
+### 6. 同步与配置表
+
+#### SyncLog 表
+
+存储同步操作日志。
+
+```sql
+CREATE TABLE SyncLog (
+    syncId TEXT PRIMARY KEY,             -- 同步记录唯一标识
+    entityName TEXT NOT NULL,            -- 同步的实体类型
+    entityId TEXT NOT NULL,              -- 实体ID
+    operation TEXT NOT NULL,             -- 操作类型：'insert', 'update', 'delete'
+    timestamp INTEGER NOT NULL,          -- 操作时间（时间戳）
+    status TEXT NOT NULL,                -- 同步状态：'pending', 'success', 'failed', 'retrying'
+    retryCount INTEGER NOT NULL DEFAULT 0, -- 重试次数
+    errorDetails TEXT,                   -- 错误详情
+    payload TEXT                         -- 操作的数据内容（JSON格式）
+)
+```
+
+索引：
+- `CREATE INDEX idx_synclog_status ON SyncLog(status)`
+- `CREATE INDEX idx_synclog_timestamp ON SyncLog(timestamp)`
+- `CREATE INDEX idx_synclog_entity ON SyncLog(entityName, entityId)`
+
+#### AppConfig 表
+
+存储应用配置。
+
+```sql
+CREATE TABLE AppConfig (
+    configId INTEGER PRIMARY KEY AUTOINCREMENT,  -- 自增主键
+    key TEXT NOT NULL UNIQUE,                    -- 配置键（唯一）
+    value TEXT NOT NULL,                         -- 配置值
+    updatedAt INTEGER NOT NULL                   -- 更新时间（时间戳）
+)
+```
+
+索引：
+- `CREATE INDEX idx_appconfig_key ON AppConfig(key)`
+
+## 数据库关系图
+
+以下是主要表之间的关系：
+
+```
+User ──────┐
+           │
+           ▼
+    UserPreference
+           
+Conversation ◄───── Message
+       
+       ┌─────── Speaker ◄─────┐
+       │                      │
+Meeting ◄───── TranscriptionSegment
+       
+MediaFile ◄───── RecognitionResult
+
+Device ◄───── ConnectionStatus
+```
+
+## Room实体类设计
+
+以下是主要表对应的Room实体类定义：
+
+### User实体
+
+```kotlin
+@Entity(tableName = "User")
+data class User(
+    @PrimaryKey
+    val userId: String,
+    val name: String,
+    val avatarUrl: String?,
+    val lastLogin: Long?,
+    val createdAt: Long
+)
+```
+
+### Message实体
+
+```kotlin
+@Entity(
+    tableName = "Message",
+    foreignKeys = [
+        ForeignKey(
+            entity = Conversation::class,
+            parentColumns = ["conversationId"],
+            childColumns = ["conversationId"],
+            onDelete = ForeignKey.CASCADE
+        )
+    ],
+    indices = [
+        Index("conversationId"),
+        Index("timestamp"),
+        Index("senderId"),
+        Index(value = ["conversationId", "timestamp"])
+    ]
+)
+data class Message(
+    @PrimaryKey
+    val msgId: String,
+    val conversationId: String,
+    val senderId: String,
+    val content: String,
+    val timestamp: Long,
+    val type: String,
+    val status: String,
+    val metadata: String?
+)
+```
+
+### Meeting和TranscriptionSegment关系
+
+```kotlin
+@Entity(tableName = "Meeting")
+data class Meeting(
+    @PrimaryKey
+    val meetingId: String,
+    val title: String,
+    val startTime: Long,
+    val endTime: Long?,
+    val status: String,
+    val metadata: String?
+)
+
+@Entity(
+    tableName = "TranscriptionSegment",
+    foreignKeys = [
+        ForeignKey(
+            entity = Meeting::class,
+            parentColumns = ["meetingId"],
+            childColumns = ["meetingId"],
+            onDelete = ForeignKey.CASCADE
+        ),
+        ForeignKey(
+            entity = Speaker::class,
+            parentColumns = ["speakerId"],
+            childColumns = ["speakerId"],
+            onDelete = ForeignKey.SET_NULL
+        )
+    ],
+    indices = [
+        Index("meetingId"),
+        Index("speakerId"),
+        Index(value = ["meetingId", "startTimeMs", "endTimeMs"])
+    ]
+)
+data class TranscriptionSegment(
+    @PrimaryKey
+    val segmentId: String,
+    val meetingId: String,
+    val speakerId: String?,
+    val text: String,
+    val startTimeMs: Long,
+    val endTimeMs: Long,
+    val confidence: Float?
+)
+```
+
+## 数据访问对象 (DAO)
+
+以下是主要实体的DAO接口示例：
+
+### UserDao
+
+```kotlin
+@Dao
+interface UserDao {
+    @Insert
+    suspend fun insert(user: User): Long
+    
+    @Update
+    suspend fun update(user: User): Int
+    
+    @Delete
+    suspend fun delete(user: User): Int
+    
+    @Query("SELECT * FROM User WHERE userId = :userId")
+    suspend fun findById(userId: String): User?
+    
+    @Query("SELECT * FROM User ORDER BY createdAt DESC")
+    suspend fun findAll(): List<User>
+    
+    @Query("SELECT * FROM User WHERE userId = :userId")
+    fun observeById(userId: String): Flow<User?>
+    
+    @Query("SELECT * FROM User ORDER BY createdAt DESC")
+    fun observeAll(): Flow<List<User>>
+}
+```
+
+### MessageDao
+
+```kotlin
+@Dao
+interface MessageDao {
+    @Insert
+    suspend fun insert(message: Message): Long
+    
+    @Insert
+    suspend fun insertAll(messages: List<Message>): List<Long>
+    
+    @Update
+    suspend fun update(message: Message): Int
+    
+    @Delete
+    suspend fun delete(message: Message): Int
+    
+    @Query("SELECT * FROM Message WHERE msgId = :msgId")
+    suspend fun findById(msgId: String): Message?
+    
+    @Query("SELECT * FROM Message WHERE conversationId = :conversationId ORDER BY timestamp DESC LIMIT :limit OFFSET :offset")
+    suspend fun findByConversation(conversationId: String, limit: Int, offset: Int): List<Message>
+    
+    @Query("SELECT * FROM Message WHERE conversationId = :conversationId ORDER BY timestamp DESC")
+    fun observeByConversation(conversationId: String): Flow<List<Message>>
+    
+    @Query("SELECT COUNT(*) FROM Message WHERE conversationId = :conversationId")
+    fun observeMessageCount(conversationId: String): Flow<Int>
+}
+```
+
+### MeetingDao
+
+```kotlin
+@Dao
+interface MeetingDao {
+    @Insert
+    suspend fun insert(meeting: Meeting): Long
+    
+    @Update
+    suspend fun update(meeting: Meeting): Int
+    
+    @Delete
+    suspend fun delete(meeting: Meeting): Int
+    
+    @Query("SELECT * FROM Meeting WHERE meetingId = :meetingId")
+    suspend fun findById(meetingId: String): Meeting?
+    
+    @Query("SELECT * FROM Meeting ORDER BY startTime DESC")
+    suspend fun findAll(): List<Meeting>
+    
+    @Query("SELECT * FROM Meeting WHERE status = :status ORDER BY startTime DESC")
+    suspend fun findByStatus(status: String): List<Meeting>
+    
+    @Query("SELECT * FROM Meeting WHERE meetingId = :meetingId")
+    fun observeById(meetingId: String): Flow<Meeting?>
+    
+    @Transaction
+    @Query("SELECT * FROM Meeting WHERE meetingId = :meetingId")
+    fun observeMeetingWithDetails(meetingId: String): Flow<MeetingWithDetails>
+}
+```
+
+## 关系类
+
+用于表示实体间的关系和嵌套查询结果。
+
+### MeetingWithDetails
+
+```kotlin
+data class MeetingWithDetails(
+    @Embedded val meeting: Meeting,
+    
+    @Relation(
+        parentColumn = "meetingId",
+        entityColumn = "meetingId"
+    )
+    val speakers: List<Speaker>,
+    
+    @Relation(
+        parentColumn = "meetingId",
+        entityColumn = "meetingId"
+    )
+    val transcriptions: List<TranscriptionSegment>
+)
+```
+
+### ConversationWithMessages
+
+```kotlin
+data class ConversationWithMessages(
+    @Embedded val conversation: Conversation,
+    
+    @Relation(
+        parentColumn = "conversationId",
+        entityColumn = "conversationId"
+    )
+    val messages: List<Message>
+)
+```
+
+## 数据库版本迁移
+
+Room数据库版本迁移示例：
+
+```kotlin
+val MIGRATION_1_2 = object : Migration(1, 2) {
+    override fun migrate(database: SupportSQLiteDatabase) {
+        // 添加新字段到MediaFile表
+        database.execSQL(
+            "ALTER TABLE MediaFile ADD COLUMN width INTEGER"
+        )
+        database.execSQL(
+            "ALTER TABLE MediaFile ADD COLUMN height INTEGER"
+        )
+    }
+}
+
+val MIGRATION_2_3 = object : Migration(2, 3) {
+    override fun migrate(database: SupportSQLiteDatabase) {
+        // 创建新表
+        database.execSQL(
+            "CREATE TABLE Device (" +
+            "deviceId TEXT PRIMARY KEY NOT NULL, " +
+            "name TEXT NOT NULL, " +
+            "type TEXT NOT NULL, " +
+            "lastPaired INTEGER, " +
+            "metadata TEXT)"
+        )
+        
+        // 创建索引
+        database.execSQL(
+            "CREATE INDEX idx_device_type ON Device(type)"
+        )
+        database.execSQL(
+            "CREATE INDEX idx_device_lastPaired ON Device(lastPaired)"
+        )
+    }
+}
+```
+
+## 数据库初始化
+
+Room数据库初始化配置：
+
+```kotlin
+@Database(
+    entities = [
+        User::class,
+        UserPreference::class,
+        Conversation::class,
+        Message::class,
+        Meeting::class,
+        Speaker::class,
+        TranscriptionSegment::class,
+        MediaFile::class,
+        RecognitionResult::class,
+        Device::class,
+        ConnectionStatus::class,
+        SyncLog::class,
+        AppConfig::class
+    ],
+    version = 1,
+    exportSchema = true
+)
+abstract class AppDatabase : RoomDatabase() {
+    abstract fun userDao(): UserDao
+    abstract fun userPreferenceDao(): UserPreferenceDao
+    abstract fun conversationDao(): ConversationDao
+    abstract fun messageDao(): MessageDao
+    abstract fun meetingDao(): MeetingDao
+    abstract fun speakerDao(): SpeakerDao
+    abstract fun transcriptionSegmentDao(): TranscriptionSegmentDao
+    abstract fun mediaFileDao(): MediaFileDao
+    abstract fun recognitionResultDao(): RecognitionResultDao
+    abstract fun deviceDao(): DeviceDao
+    abstract fun connectionStatusDao(): ConnectionStatusDao
+    abstract fun syncLogDao(): SyncLogDao
+    abstract fun appConfigDao(): AppConfigDao
+    
+    companion object {
+        @Volatile
+        private var INSTANCE: AppDatabase? = null
+        
+        fun getInstance(context: Context): AppDatabase {
+            return INSTANCE ?: synchronized(this) {
+                val instance = Room.databaseBuilder(
+                    context.applicationContext,
+                    AppDatabase::class.java,
+                    "app_database"
+                )
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
+                .build()
+                INSTANCE = instance
+                instance
+            }
+        }
+    }
+}
+```
+
+通过以上数据库设计，存储模块可以有效管理应用中的各类数据，并支持复杂的查询、关联和实时数据流。
+
