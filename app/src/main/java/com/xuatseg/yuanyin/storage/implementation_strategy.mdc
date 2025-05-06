@@ -1,0 +1,776 @@
+---
+description: 
+globs: 
+alwaysApply: false
+---
+# 存储模块实现策略
+
+## 技术选型
+
+存储模块的实现将采用以下技术栈，充分利用Kotlin 2.0和Jetpack组件的最新特性：
+
+### 核心技术
+
+1. **Kotlin 2.0**
+   - 利用上下文接收器设计流畅的DSL风格API
+   - 使用K2编译器提高编译速度和类型安全
+   - 应用协程与Flow进行异步操作和反应式数据流
+
+2. **Room 2.5+**
+   - 用于关系型数据库的主要持久化方案
+   - 支持Kotlin协程和Flow的强大ORM框架
+   - 提供编译时SQL检查和自动化数据对象映射
+
+3. **Realm Kotlin 1.10+**
+   - 用于高频写入和实时数据场景
+   - 提供面向对象的数据模型和响应式查询
+   - 支持复杂对象图和高性能操作
+
+4. **DataStore 1.0**
+   - 用于键值对存储，替代SharedPreferences
+   - 提供类型安全的数据访问和协程支持
+   - 具有内置数据迁移和错误处理机制
+
+5. **Android FileSystem API**
+   - 用于媒体文件和大型二进制数据的存储
+   - 结合MediaStore API进行媒体文件管理
+   - 支持分区存储和权限管理
+
+6. **Kotlin Serialization**
+   - 用于对象序列化和反序列化
+   - 提供高效的JSON处理
+   - 支持自定义序列化器和多态序列化
+
+7. **Hilt**
+   - 用于依赖注入
+   - 简化组件间的依赖关系管理
+   - 提高代码可测试性和模块化
+
+## 多层级存储架构实现
+
+### 1. 存储管理器实现 (AdaptiveStorageManagerImpl)
+
+存储管理器作为整个存储模块的入口点，负责协调各个子组件的工作。
+
+```kotlin
+@Singleton
+class AdaptiveStorageManagerImpl @Inject constructor(
+    private val context: Context,
+    private val config: StorageConfig,
+    @ApplicationScope private val scope: CoroutineScope
+) : IStorageManager {
+    
+    // 懒加载各个组件
+    private val roomDatabase by lazy { createRoomDatabase() }
+    private val realmDatabase by lazy { createRealmDatabase() }
+    private val fileStorage by lazy { createFileStorage() }
+    private val keyValueStorage by lazy { createKeyValueStorage() }
+    private val resourceMonitor by lazy { createResourceMonitor() }
+    private val strategyEngine by lazy { createStrategyEngine() }
+    private val storageSelector by lazy { createStorageSelector() }
+    private val cacheManager by lazy { createCacheManager() }
+    private val retentionManager by lazy { createRetentionManager() }
+    
+    // 事件流
+    private val _storageEvents = MutableSharedFlow<StorageEvent>(
+        extraBufferCapacity = 64,
+        onBufferOverflow = BufferOverflow.DROP_OLDEST
+    )
+    
+    // 实现接口方法...
+}
+```
+
+### 2. 资源监控实现 (ResourceMonitorImpl)
+
+资源监控器负责监控设备资源状态，为存储策略提供数据支持。
+
+```kotlin
+class ResourceMonitorImpl @Inject constructor(
+    private val context: Context,
+    @ApplicationScope private val scope: CoroutineScope
+) : IResourceMonitor {
+    
+    // 实现各种资源监控...
+    
+    // 使用ContentResolver监控存储空间
+    private fun monitorStorageSpace() {
+        scope.launch {
+            while(isActive) {
+                updateStorageStatus()
+                delay(STORAGE_CHECK_INTERVAL)
+            }
+        }
+    }
+    
+    // 使用ConnectivityManager监控网络状态
+    private fun monitorNetworkState() {
+        val connectivityManager = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+        // 实现网络监控...
+    }
+    
+    // 实现其他资源监控...
+}
+```
+
+### 3. 存储策略引擎实现 (StorageStrategyEngineImpl)
+
+策略引擎根据资源状态确定最合适的存储策略。
+
+```kotlin
+class StorageStrategyEngineImpl @Inject constructor(
+    private val resourceMonitor: IResourceMonitor,
+    private val config: StorageConfig
+) : IStorageStrategyEngine {
+    
+    // 使用StateFlow管理当前策略
+    override val currentStrategy = MutableStateFlow<StorageStrategy>(StorageStrategy.Normal)
+    
+    // 策略决策逻辑
+    private fun determineOptimalStrategy(
+        storage: StorageStatus,
+        network: NetworkStatus,
+        battery: BatteryStatus,
+        memory: MemoryStatus
+    ): StorageStrategy {
+        // 复杂决策逻辑实现...
+        return when {
+            // 各种条件判断...
+            else -> StorageStrategy.Normal
+        }
+    }
+    
+    // 监控资源变化并调整策略
+    private fun startStrategyMonitoring() {
+        // 使用Flow.combine合并多个资源状态
+    }
+}
+```
+
+### 4. 存储选择器实现 (StorageSelectorImpl)
+
+存储选择器根据数据类型和当前策略选择最合适的存储实现。
+
+```kotlin
+class StorageSelectorImpl @Inject constructor(
+    private val roomDatabase: AppDatabase,
+    private val realmDatabase: RealmDatabase,
+    private val fileStorage: FileStorageImpl,
+    private val keyValueStorage: DataStoreManager,
+    private val strategyEngine: IStorageStrategyEngine
+) : IStorageSelector {
+    
+    // 缓存已创建的存储库实例
+    private val repositoryCache = ConcurrentHashMap<KClass<*>, MutableMap<AccessPattern, IRepository<*>>>()
+    
+    // 选择存储库的逻辑实现
+    override fun <T : Any> selectRepositoryFor(
+        entityClass: KClass<T>,
+        accessPattern: AccessPattern?
+    ): IRepository<T> {
+        // 根据数据类型、访问模式和当前策略选择最佳存储实现
+    }
+}
+```
+
+## 自适应存储策略实现
+
+### 1. 策略定义与状态模型
+
+```kotlin
+// 存储策略模型
+sealed class StorageStrategy {
+    object Normal : StorageStrategy()
+    object StorageCritical : StorageStrategy()
+    object Offline : StorageStrategy()
+    object PowerSaving : StorageStrategy()
+}
+
+// 资源状态模型
+sealed class StorageStatus {
+    object Unknown : StorageStatus()
+    data class Available(
+        val availableBytes: Long,
+        val totalBytes: Long,
+        val usagePercentage: Float
+    ) : StorageStatus()
+}
+
+// 其他状态模型...
+```
+
+### 2. 缓存管理实现
+
+```kotlin
+class AdaptiveCacheManagerImpl @Inject constructor(
+    private val strategyEngine: IStorageStrategyEngine,
+    private val context: Context
+) : ICacheManager {
+    
+    // 缓存存储
+    private val caches = ConcurrentHashMap<String, Cache<*, *>>()
+    
+    // 根据策略动态调整缓存大小
+    override suspend fun adjustCacheSize(name: String, newMaxSize: Int): Boolean {
+        val cache = caches[name] as? LruCache<*, *> ?: return false
+        cache.resize(newMaxSize)
+        return true
+    }
+    
+    // 实现策略监听
+    init {
+        strategyEngine.currentStrategy.onEach { strategy ->
+            when (strategy) {
+                is StorageStrategy.StorageCritical -> handleCriticalStorage()
+                is StorageStrategy.PowerSaving -> handlePowerSaving()
+                // 其他策略处理...
+            }
+        }.launchIn(CoroutineScope(Dispatchers.Default))
+    }
+    
+    // 策略处理方法...
+}
+```
+
+### 3. 数据留存管理实现
+
+```kotlin
+class DataRetentionManagerImpl @Inject constructor(
+    private val strategyEngine: IStorageStrategyEngine,
+    private val storageManager: IStorageManager,
+    private val fileStorage: IFileStorage
+) : IDataRetentionManager {
+    
+    // 数据留存策略
+    private val retentionPolicies = mutableListOf<RetentionPolicy>()
+    
+    // 根据级别执行数据清理
+    override suspend fun performRetention(level: RetentionLevel): RetentionResult {
+        return when (level) {
+            RetentionLevel.LIGHT -> performLightRetention()
+            RetentionLevel.NORMAL -> performNormalRetention()
+            RetentionLevel.AGGRESSIVE -> performAggressiveRetention()
+        }
+    }
+    
+    // 实现各级别的数据清理...
+}
+```
+
+## 具体存储实现
+
+### 1. Room数据库实现
+
+```kotlin
+// Room数据库配置
+@Database(
+    entities = [
+        User::class,
+        UserPreference::class,
+        Conversation::class,
+        Message::class,
+        // 其他实体...
+    ],
+    version = 1,
+    exportSchema = true
+)
+abstract class AppDatabase : RoomDatabase() {
+    // DAO接口...
+    
+    companion object {
+        // 数据库创建方法...
+    }
+}
+
+// Room存储库实现
+class RoomRepository<T : Any> @Inject constructor(
+    private val database: AppDatabase,
+    private val entityClass: KClass<T>
+) : IRepository<T> {
+    
+    // 获取对应的DAO
+    private val dao: Any = when (entityClass) {
+        User::class -> database.userDao()
+        Message::class -> database.messageDao()
+        // 其他实体对应的DAO...
+        else -> throw IllegalArgumentException("Unsupported entity type: ${entityClass.simpleName}")
+    }
+    
+    // 实现Repository接口方法...
+}
+```
+
+### 2. Realm数据库实现
+
+```kotlin
+// Realm配置
+class RealmDatabase @Inject constructor(
+    private val context: Context,
+    private val config: String
+) {
+    // Realm实例管理...
+    
+    fun <T : RealmObject> getRepository(modelClass: KClass<T>): RealmRepository<T> {
+        return RealmRepository(this, modelClass)
+    }
+}
+
+// Realm存储库实现
+class RealmRepository<T : RealmObject> @Inject constructor(
+    private val realmDatabase: RealmDatabase,
+    private val modelClass: KClass<T>
+) : IRepository<T> {
+    
+    // 实现Repository接口方法...
+}
+```
+
+### 3. 文件存储实现
+
+```kotlin
+class FileStorageImpl @Inject constructor(
+    private val context: Context,
+    private val baseDirectory: String,
+    private val encryptionEnabled: Boolean
+) : IFileStorage {
+    
+    // 确保目录存在
+    init {
+        createRequiredDirectories()
+    }
+    
+    // 实现文件操作方法...
+    
+    // 加密文件存储
+    private fun saveEncryptedFile(path: String, data: ByteArray): String {
+        // 实现加密逻辑...
+    }
+    
+    // 解密文件读取
+    private fun loadEncryptedFile(path: String): ByteArray? {
+        // 实现解密逻辑...
+    }
+}
+```
+
+### 4. 键值存储实现
+
+```kotlin
+class DataStoreManagerImpl @Inject constructor(
+    private val context: Context
+) : IKeyValueStorage {
+    
+    // 创建DataStore实例
+    private val dataStore = context.createDataStore(
+        name = "app_preferences",
+        migrations = listOf(SharedPreferencesMigration(context, "app_preferences"))
+    )
+    
+    // 实现键值存储方法...
+}
+```
+
+## 事务和并发控制
+
+### 1. 事务支持实现
+
+```kotlin
+// 使用上下文接收器实现事务DSL
+context(CoroutineScope)
+suspend fun <T : Any, R> IRepository<T>.withTransaction(
+    block: suspend context(TransactionScope<T>) () -> R
+): R {
+    return database.withTransaction {
+        val scope = TransactionScope(this@IRepository)
+        block(scope)
+    }
+}
+
+// 事务作用域实现
+class TransactionScope<T : Any>(
+    val repository: IRepository<T>
+) {
+    // 提供在事务中访问存储库的方法...
+}
+```
+
+### 2. 并发控制实现
+
+```kotlin
+// 并发控制工具
+object ConcurrencyController {
+    // 使用协程的互斥锁进行并发控制
+    private val mutexes = ConcurrentHashMap<String, Mutex>()
+    
+    // 获取特定资源的互斥锁
+    fun getMutex(resourceId: String): Mutex {
+        return mutexes.getOrPut(resourceId) { Mutex() }
+    }
+    
+    // 使用互斥锁执行操作
+    suspend fun <T> withLock(resourceId: String, block: suspend () -> T): T {
+        val mutex = getMutex(resourceId)
+        return mutex.withLock { block() }
+    }
+}
+```
+
+## 数据流和反应式编程
+
+### 1. Flow集成
+
+```kotlin
+// 使用Flow提供反应式数据流
+class RoomRepository<T : Any> @Inject constructor(/* 参数 */) : IRepository<T> {
+    
+    // 实现观察方法
+    override fun observeById(id: Any): Flow<T?> {
+        return when (entityClass) {
+            User::class -> (dao as UserDao).observeById(id as String).map { it as T? }
+            // 其他实体类型...
+            else -> emptyFlow()
+        }
+    }
+    
+    // 其他观察方法...
+}
+```
+
+### 2. StateFlow与UI集成
+
+```kotlin
+// 在ViewModel中使用StateFlow
+class UserViewModel @Inject constructor(
+    private val userRepository: IRepository<User>
+) : ViewModel() {
+    
+    // 将Flow转换为StateFlow
+    val user: StateFlow<User?> = userRepository
+        .observeById(userId)
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = null
+        )
+    
+    // 其他StateFlow...
+}
+```
+
+### 3. 流转换和组合
+
+```kotlin
+// 数据流转换和组合
+fun getMeetingWithDetails(meetingId: String): Flow<MeetingDetails> {
+    val meetingFlow = meetingRepository.observeById(meetingId)
+    val speakersFlow = speakerRepository.observeQuery(
+        Query.whereEqualTo("meetingId", meetingId)
+    )
+    val transcriptionsFlow = transcriptionRepository.observeQuery(
+        Query.whereEqualTo("meetingId", meetingId).orderBy("startTimeMs")
+    )
+    
+    return combine(
+        meetingFlow,
+        speakersFlow,
+        transcriptionsFlow
+    ) { meeting, speakers, transcriptions ->
+        MeetingDetails(
+            meeting = meeting,
+            speakers = speakers,
+            transcriptions = transcriptions
+        )
+    }.filterNotNull()
+}
+```
+
+## 安全与加密
+
+### 1. 敏感数据加密
+
+```kotlin
+// 加密工具
+class EncryptionManager @Inject constructor(
+    private val context: Context
+) {
+    // 使用Android Keystore系统
+    private val keyStore = KeyStore.getInstance("AndroidKeyStore").apply {
+        load(null)
+    }
+    
+    // 创建或获取加密密钥
+    private fun getOrCreateSecretKey(keyName: String): SecretKey {
+        // 密钥生成逻辑...
+    }
+    
+    // 加密数据
+    fun encrypt(data: ByteArray, keyName: String): ByteArray {
+        // 加密逻辑...
+    }
+    
+    // 解密数据
+    fun decrypt(encryptedData: ByteArray, keyName: String): ByteArray {
+        // 解密逻辑...
+    }
+}
+```
+
+### 2. 安全存储实现
+
+```kotlin
+// 安全存储实现
+class SecureRepositoryDecorator<T : Any>(
+    private val repository: IRepository<T>,
+    private val encryptionManager: EncryptionManager,
+    private val encryptedFields: Set<String>
+) : IRepository<T> {
+    
+    // 在存储前加密敏感字段
+    override suspend fun insert(item: T): Any {
+        val encryptedItem = encryptSensitiveFields(item)
+        return repository.insert(encryptedItem)
+    }
+    
+    // 在读取后解密敏感字段
+    override suspend fun getById(id: Any): T? {
+        val encryptedItem = repository.getById(id) ?: return null
+        return decryptSensitiveFields(encryptedItem)
+    }
+    
+    // 其他方法类似实现...
+    
+    // 加密敏感字段
+    private fun encryptSensitiveFields(item: T): T {
+        // 使用反射加密指定字段...
+    }
+    
+    // 解密敏感字段
+    private fun decryptSensitiveFields(item: T): T {
+        // 使用反射解密指定字段...
+    }
+}
+```
+
+## 测试策略
+
+### 1. 单元测试实现
+
+```kotlin
+// 存储库单元测试
+@RunWith(JUnit4::class)
+class UserRepositoryTest {
+    
+    // 使用Room内存数据库进行测试
+    @get:Rule
+    val instantExecutorRule = InstantTaskExecutorRule()
+    
+    private lateinit var database: AppDatabase
+    private lateinit var userRepository: IRepository<User>
+    
+    @Before
+    fun setup() {
+        // 设置内存数据库
+        database = Room.inMemoryDatabaseBuilder(
+            ApplicationProvider.getApplicationContext(),
+            AppDatabase::class.java
+        ).allowMainThreadQueries().build()
+        
+        userRepository = RoomRepository(database, User::class)
+    }
+    
+    @Test
+    fun testInsertAndRetrieveUser() = runTest {
+        // 测试逻辑...
+    }
+    
+    // 其他测试方法...
+}
+```
+
+### 2. 集成测试实现
+
+```kotlin
+// 存储管理器集成测试
+@HiltAndroidTest
+@RunWith(AndroidJUnit4::class)
+class StorageManagerIntegrationTest {
+    
+    @get:Rule
+    val hiltRule = HiltAndroidRule(this)
+    
+    @Inject
+    lateinit var storageManager: IStorageManager
+    
+    @Before
+    fun setup() {
+        hiltRule.inject()
+    }
+    
+    @Test
+    fun testInitializeAndShutdown() = runTest {
+        // 测试逻辑...
+    }
+    
+    // 其他测试方法...
+}
+```
+
+### 3. 模拟测试实现
+
+```kotlin
+// 策略引擎测试
+@RunWith(JUnit4::class)
+class StorageStrategyEngineTest {
+    
+    @Mock
+    lateinit var resourceMonitor: IResourceMonitor
+    
+    @Mock
+    lateinit var config: StorageConfig
+    
+    private lateinit var strategyEngine: StorageStrategyEngineImpl
+    
+    @Before
+    fun setup() {
+        MockitoAnnotations.openMocks(this)
+        
+        // 设置模拟返回值
+        // ...
+        
+        strategyEngine = StorageStrategyEngineImpl(resourceMonitor, config)
+    }
+    
+    @Test
+    fun testStrategySelection() = runTest {
+        // 测试逻辑...
+    }
+    
+    // 其他测试方法...
+}
+```
+
+## 性能优化策略
+
+### 1. 数据库优化
+
+- 适当的索引设计
+- 批量操作支持
+- 懒加载与分页查询
+- 定期数据库维护
+
+```kotlin
+// 分页查询示例
+fun getPagedMessages(conversationId: String): Flow<PagingData<Message>> {
+    return Pager(
+        config = PagingConfig(
+            pageSize = 20,
+            enablePlaceholders = false,
+            maxSize = 100
+        ),
+        pagingSourceFactory = {
+            MessagePagingSource(database.messageDao(), conversationId)
+        }
+    ).flow
+}
+```
+
+### 2. 缓存优化
+
+- 多级缓存策略
+- LRU缓存算法
+- 预取与懒加载结合
+
+```kotlin
+// 缓存管理示例
+class TwoLevelCache<K : Any, V : Any>(
+    private val memoryCache: Cache<K, V>,
+    private val diskCache: Cache<K, V>
+) : Cache<K, V> {
+    
+    override suspend fun get(key: K): V? {
+        // 先查内存缓存，再查磁盘缓存
+        return memoryCache.get(key) ?: diskCache.get(key)?.also {
+            // 将磁盘缓存结果放入内存缓存
+            memoryCache.put(key, it)
+        }
+    }
+    
+    // 其他方法...
+}
+```
+
+### 3. 文件操作优化
+
+- 分块处理大文件
+- 后台线程处理IO
+- 文件压缩与预处理
+
+```kotlin
+// 大文件分块处理示例
+suspend fun saveMediaFile(uri: Uri, mimeType: String): MediaFile {
+    return withContext(Dispatchers.IO) {
+        // 分块读取并存储文件
+        context.contentResolver.openInputStream(uri)?.use { input ->
+            val file = createTemporaryFile(mimeType)
+            val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+            var read: Int
+            
+            FileOutputStream(file).use { output ->
+                while (input.read(buffer).also { read = it } != -1) {
+                    output.write(buffer, 0, read)
+                }
+                output.flush()
+            }
+            
+            // 处理文件元数据并返回MediaFile对象
+            createMediaFileFromFile(file, mimeType)
+        } ?: throw IOException("Could not open input stream")
+    }
+}
+```
+
+## 依赖注入配置
+
+使用Hilt进行依赖注入配置：
+
+```kotlin
+@Module
+@InstallIn(SingletonComponent::class)
+object StorageModule {
+    
+    @Provides
+    @Singleton
+    fun provideStorageConfig(
+        @ApplicationContext context: Context
+    ): StorageConfig {
+        // 创建配置...
+    }
+    
+    @Provides
+    @Singleton
+    fun provideStorageManager(
+        @ApplicationContext context: Context,
+        config: StorageConfig,
+        @ApplicationScope scope: CoroutineScope
+    ): IStorageManager {
+        return AdaptiveStorageManagerImpl(context, config, scope)
+    }
+    
+    // 提供其他组件...
+}
+
+// 定义应用作用域
+@Retention(AnnotationRetention.RUNTIME)
+@Qualifier
+annotation class ApplicationScope
+
+@Provides
+@Singleton
+@ApplicationScope
+fun provideApplicationScope(): CoroutineScope {
+    return CoroutineScope(SupervisorJob() + Dispatchers.Default)
+}
+```
+
+通过以上实现策略，存储模块将能够提供高性能、安全可靠且资源高效的数据存储服务，同时保持良好的可测试性和可维护性。
+
