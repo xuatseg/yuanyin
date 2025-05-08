@@ -1,0 +1,28 @@
+pluginManagement {
+    repositories {
+        google()
+        mavenCentral()
+        gradlePluginPortal()
+    }
+}
+
+dependencyResolutionManagement {
+    repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+    repositories {
+        google()
+        mavenCentral()
+        maven { url 'https://jitpack.io' }
+    }
+}
+
+rootProject.name = "LooiRobot"
+include ':app'
+include ':core:face-recognition'
+include ':core:robot-control'
+include ':core:voice-interaction'
+include ':core:projection'
+include ':core:llm'
+include ':domain'
+include ':data'
+include ':ui'
+include ':presentation' 
