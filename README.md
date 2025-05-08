@@ -140,7 +140,45 @@ stateManager.observeState().collect { state ->
 stateManager.handleEvent(SystemEvent.Initialize)
 ```
 
-### 3. 错误处理
+### 3. 机器人表情管理
+
+#### 替换默认表情
+默认的机器人表情显示为"^_^"，要替换这个表情：
+1. 打开 `app/src/main/java/com/xuatseg/yuanyin/ui/screens/MainScreen.kt`
+2. 找到RobotFace部分的代码（在Box组件内）
+3. 修改Text组件中的text参数值，例如：
+```kotlin
+Text(
+    text = "●ω●", // 将 "^_^" 改为你想要的表情
+    fontSize = 48.sp,
+    fontWeight = FontWeight.Bold,
+    color = MaterialTheme.colorScheme.onPrimaryContainer
+)
+```
+
+#### 语音唤醒打断表情
+当检测到语音唤醒时，可以通过以下方式临时改变机器人表情：
+1. 在MainViewModel中添加表情状态：
+```kotlin
+private val _robotExpression = MutableStateFlow("^_^")
+val robotExpression: StateFlow<String> = _robotExpression.asStateFlow()
+
+fun updateExpression(newExpression: String) {
+    viewModelScope.launch {
+        _robotExpression.value = newExpression
+        // 可以设置延时后恢复默认表情
+        delay(2000) // 2秒后
+        _robotExpression.value = "^_^"
+    }
+}
+```
+
+2. 在语音唤醒检测到时调用：
+```kotlin
+viewModel.updateExpression("O_O") // 使用惊讶表情表示正在听
+```
+
+### 4. 错误处理
 ```kotlin
 try {
     // 执行操作
