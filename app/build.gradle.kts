@@ -54,7 +54,6 @@ dependencies {
     val composeBomVersion = "2025.02.00"
     implementation(platform("androidx.compose:compose-bom:$composeBomVersion"))
 
-
     implementation(libs.androidx.core.ktx.v1120)
     implementation(libs.androidx.lifecycle.runtime.ktx.v262)
     implementation(libs.androidx.activity.compose.v181)
@@ -62,6 +61,13 @@ dependencies {
     implementation("androidx.compose.ui:ui-graphics")
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.compose.material3:material3")
+
+    // ExoPlayer for Compose video playback
+    implementation("androidx.media3:media3-exoplayer:1.2.1")
+    implementation("androidx.media3:media3-ui:1.2.1")
+    implementation("androidx.media3:media3-exoplayer-dash:1.2.1")
+    implementation("androidx.media3:media3-exoplayer-hls:1.2.1")
+    implementation("androidx.media3:media3-exoplayer-rtsp:1.2.1")
     
     testImplementation("junit:junit:4.13.2")
     androidTestImplementation("androidx.test.ext:junit:1.1.5")
